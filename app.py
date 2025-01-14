@@ -35,7 +35,7 @@ def geocode_address_nominatim(address):
 def get_journey(from_coords, to_coords):
     url = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys"
     headers = {
-        "apiKey": "KkPA9v9GACNySCo1exiZENBpVQFlY6Uj"  # Remplacez par votre clé IDFM valide
+        "apiKey": "2YEYHtHujh6xoWZn4mNaUqLfIg4rMSSS"  # Remplacez par votre clé IDFM valide
     }
     params = {
         "from": from_coords,
