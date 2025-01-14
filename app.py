@@ -142,7 +142,7 @@ if st.button("Calculer l'itinéraire"):
             st.info("Récupération de l'itinéraire...")
             journey_data = get_journey(from_coords, to_coords)
             if journey_data:
-                display_journey_choices(journey_data)
+                display_journey_choices(journey_data) #fdsqfsqfd
         else:
             st.error("Impossible de récupérer les coordonnées. Vérifiez vos adresses.")
     else:
