@@ -1,7 +1,9 @@
 import streamlit as st
 import requests
-import time
 from datetime import datetime
+import folium
+from streamlit_folium import st_folium
+from folium.plugins import FeatureGroupSubGroup
 
 # Fonction pour géocoder une adresse avec Nominatim
 def geocode_address_nominatim(address):
@@ -35,7 +37,7 @@ def geocode_address_nominatim(address):
 def get_journey(from_coords, to_coords):
     url = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys"
     headers = {
-        "apiKey": "Nls6MNAOPfShwP9wKokSoEQmqU7XNGuv"  # Remplacez par votre clé IDFM valide
+        "apiKey": "YISw3BZQz6Jp328r5JIAerXb8KbftqEc"  # Remplacez par votre clé IDFM valide
     }
     params = {
         "from": from_coords,
@@ -49,7 +51,7 @@ def get_journey(from_coords, to_coords):
         st.error(f"Erreur lors de la récupération de l'itinéraire : {e}")
         return None
 
-
+# Fonction pour afficher les trajets avec une carte et des options détaillées
 def display_journey_choices(journey_data):
     if "journeys" not in journey_data or not journey_data["journeys"]:
         st.warning("Aucun itinéraire trouvé.")
@@ -94,35 +96,62 @@ def display_journey_choices(journey_data):
 
         # Détails des sections dans un expander
         with st.expander(expander_title):
+            st.markdown("### Détails des étapes :")
+            map_center = None
+            journey_map = folium.Map(zoom_start=12)
+
+            # Liste des coordonnées pour ajuster le zoom
+            all_coords = []
+
             for section in journey["sections"]:
                 section_type = section["type"]
+                mode = section.get("mode", "Inconnu")
+                duration = section.get("duration", 0) // 60  # Convertir en minutes
+                description = section.get("display_informations", {}).get("label", "Pas d'information")
+                st.write(f"- **{section_type.capitalize()}** : {description} ({duration} min)")
 
-                if section_type == "street_network":
-                    from_name = section.get("from", {}).get("name", "Point inconnu")
-                    to_name = section.get("to", {}).get("name", "Point inconnu")
-                    duration = section.get("duration", 0)
-                    st.write(f"- 🚶‍♂️ Marche ({duration // 60} minutes) : {from_name} -> {to_name}")
+                # Coordonnées pour la carte
+                from_coords = section.get("from", {}).get("stop_point", {}).get("coord", None)
+                to_coords = section.get("to", {}).get("stop_point", {}).get("coord", None)
 
-                elif section_type == "public_transport":
-                    from_name = section.get("from", {}).get("name", "Arrêt inconnu")
-                    to_name = section.get("to", {}).get("name", "Arrêt inconnu")
-                    mode = section.get("display_informations", {}).get("commercial_mode", "Transport")
-                    line = section.get("display_informations", {}).get("label", "Ligne inconnue")
-                    duration = section.get("duration", 0)
-                    st.write(f"- 🚇 {mode} {line} ({duration // 60} minutes) : {from_name} -> {to_name}")
+                if from_coords and to_coords:
+                    from_lat, from_lon = float(from_coords["lat"]), float(from_coords["lon"])
+                    to_lat, to_lon = float(to_coords["lat"]), float(to_coords["lon"])
 
-                elif section_type == "transfer":
-                    duration = section.get("duration", 0)
-                    st.write(f"- 🔄 Correspondance ({duration // 60} minutes)")
+                    # Ajouter les coordonnées pour ajuster le zoom
+                    all_coords.extend([(from_lat, from_lon), (to_lat, to_lon)])
+
+                    # Ligne colorée pour chaque section
+                    color = "blue" if section_type == "public_transport" else "green"
+                    folium.PolyLine(
+                        [(from_lat, from_lon), (to_lat, to_lon)],
+                        color=color,
+                        weight=5,
+                        opacity=0.8
+                    ).add_to(journey_map)
+
+                    # Points de départ et d'arrivée
+                    if not map_center:
+                        map_center = [from_lat, from_lon]
+                        folium.Marker([from_lat, from_lon], popup="Départ", icon=folium.Icon(color="green")).add_to(journey_map)
+                    folium.Marker([to_lat, to_lon], popup="Arrivée", icon=folium.Icon(color="red")).add_to(journey_map)
+
+            # Ajustement automatique du zoom
+            if all_coords:
+                journey_map.fit_bounds(all_coords)
+
+            # Affichage de la carte
+            st_folium(journey_map, width=700, height=400)
 
         st.markdown("---")
-
-
-
 
 # Application Streamlit
 st.title("Calculateur d'itinéraire Ile-de-France")
 st.write("Entrez une adresse de départ et une adresse d'arrivée pour calculer un itinéraire.")
+
+# Initialisation de l'état
+if "journey_data" not in st.session_state:
+    st.session_state["journey_data"] = None
 
 # Entrée utilisateur
 departure_address = st.text_input("Adresse de départ :")
@@ -132,15 +161,18 @@ if st.button("Calculer l'itinéraire"):
     if departure_address and arrival_address:
         st.info("Géocodage des adresses...")
         from_coords = geocode_address_nominatim(departure_address)
-        time.sleep(1)
         to_coords = geocode_address_nominatim(arrival_address)
 
         if from_coords and to_coords:
             st.info("Récupération de l'itinéraire...")
             journey_data = get_journey(from_coords, to_coords)
-            if journey_data:
-                display_journey_choices(journey_data) #fdsqfsqfd
+            st.session_state["journey_data"] = journey_data
         else:
             st.error("Impossible de récupérer les coordonnées. Vérifiez vos adresses.")
     else:
         st.warning("Veuillez entrer les deux adresses.")
+
+# Affichage des résultats
+if st.session_state["journey_data"]:
+    display_journey_choices(st.session_state["journey_data"])
+
