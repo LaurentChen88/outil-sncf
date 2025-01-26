@@ -1,11 +1,30 @@
 import streamlit as st
 import requests
 from datetime import datetime
+import pandas as pd
+import pydeck as pdk
+import polyline
+
+# Fonction pour décoder les géométries Google Polyline
+def decode_polyline(polyline_str):
+    """
+    Décoder une chaîne de géométrie Google Polyline en une liste de coordonnées,
+    avec correction du décalage de la virgule des latitudes.
+    """
+    decoded_points = [{"lat": lat, "lon": lon} for lat, lon in polyline.decode(polyline_str)]
+    
+    # Vérification et ajustement des latitudes aberrantes
+    for point in decoded_points:
+        point["lat"] /= 10  # Décaler la virgule
+        point["lon"] /= 10  # Décaler la virgule
+    
+    return decoded_points
+
 
 # Fonction pour récupérer les itinéraires
 def fetch_computed_routes(api_key, waypoints, bike_details):
     """Envoie une requête à l'API Geovelo pour récupérer des itinéraires."""
-    url = "https://prim.iledefrance-mobilites.fr/marketplace/computedroutes"
+    url = "https://prim.iledefrance-mobilites.fr/marketplace/computedroutes?geometry=true"
     data = {
         "waypoints": waypoints,
         "bikeDetails": bike_details,
@@ -82,8 +101,6 @@ if st.button("Calculer l'itinéraire"):
                 # Détails des distances
                 distances = journey.get("distances", {})
                 total_distance = distances.get("total", 0)
-                recommended_roads = distances.get("recommendedRoads", 0)
-                discouraged_roads = distances.get("discouragedRoads", 0)
 
                 # Titre de l'expander
                 expander_title = (
@@ -93,22 +110,47 @@ if st.button("Calculer l'itinéraire"):
                 with st.expander(expander_title):
                     st.write(f"### Détails de l'itinéraire")
                     st.write(f"- **Distance totale :** {total_distance / 1000:.1f} km")
-                    st.write(f"- **Routes recommandées :** {recommended_roads / 1000:.1f} km")
-                    st.write(f"- **Routes déconseillées :** {discouraged_roads / 1000:.1f} km")
 
-                    section = journey.get("sections", [])[0]
-                    details = section.get("details", {})
-                    direction = details.get("direction", "N/A")
-                    vertical_gain = details.get("verticalGain", 0)
-                    vertical_loss = details.get("verticalLoss", 0)
+                    # Visualisation de l'itinéraire sur une carte
+                    st.write("#### Carte de l'itinéraire")
+                    sections = journey.get("sections", [])
+                    for section in sections:
+                        geometry = section.get("geometry")
+                        if geometry:  # Si une géométrie est fournie
+                            path = decode_polyline(geometry)  # Décoder la polyligne
+                            st.write("Coordonnées décodées :", path)
+                            map_data = pd.DataFrame(path)  # Créer un DataFrame pour pydeck
+                            
+                            # Vérification des colonnes lat et lon
+                            if 'lat' not in map_data.columns or 'lon' not in map_data.columns:
+                                st.write("Les coordonnées n'ont pas les bonnes colonnes 'lat' et 'lon'.")
+                            else:
+                                st.write("Coordonnées décodées (DataFrame) :", map_data)
+                                midpoint = map_data.mean().to_dict()
 
-                    st.write(f"- **Direction principale :** {direction}")
-                    st.write(f"- **Gain d'altitude :** {vertical_gain} m")
-                    st.write(f"- **Perte d'altitude :** {vertical_loss} m")
+                                # Formatage des données pour PathLayer
+                                path_data = [{'path': list(zip(map_data['lon'], map_data['lat']))}]
 
-                    st.write("#### Points de passage")
-                    for wp in section.get("waypoints", []):
-                        st.write(f"- {wp.get('title', 'Point inconnu')} ({wp.get('latitude')}, {wp.get('longitude')})")
+                                st.pydeck_chart(pdk.Deck(
+                                    map_style="mapbox://styles/mapbox/streets-v11",
+                                    initial_view_state=pdk.ViewState(
+                                        latitude=midpoint["lat"],
+                                        longitude=midpoint["lon"],
+                                        zoom=12
+                                    ),
+                                    layers=[
+                                        pdk.Layer(
+                                            "PathLayer",
+                                            data=path_data,
+                                            get_path="path",  # Chaque élément "path" est une liste de [lon, lat]
+                                            get_width=4,
+                                            get_color=[0, 0, 255],
+                                            pickable=True,
+                                        )
+                                    ]
+                                ))
+                        else:
+                            st.write("Aucune géométrie disponible pour cette section.")
 
             st.markdown("---")
         else:
