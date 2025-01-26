@@ -4,6 +4,36 @@ from datetime import datetime
 import pandas as pd
 import pydeck as pdk
 import polyline
+import time
+
+# Fonction pour géocoder une adresse avec Nominatim
+def geocode_address_nominatim(address):
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {
+        "q": address,
+        "format": "json",
+        "limit": 1,
+        "countrycodes": "fr"  # Limite les recherches à la France
+    }
+    headers = {
+        "User-Agent": "MonApplication/1.0 (votre@email.com)"  # User-Agent personnalisé obligatoire
+    }
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        if data:
+            longitude = data[0]["lon"]
+            latitude = data[0]["lat"]
+            return f"{longitude};{latitude}"
+        else:
+            st.warning(f"Aucun résultat trouvé pour l'adresse : {address}")
+            return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erreur lors du géocodage : {e}")
+        return None
+
 
 # Fonction pour décoder les géométries Google Polyline
 def decode_polyline(polyline_str):
@@ -20,9 +50,24 @@ def decode_polyline(polyline_str):
     
     return decoded_points
 
+def separate_coordinates(coord_str):
+    """
+    Sépare une chaîne de coordonnées au format 'longitude;latitude' en deux valeurs
+    flottantes représentant la longitude et la latitude.
+    
+    Args:
+    - coord_str (str): La chaîne contenant la longitude et la latitude séparées par ';'.
+    
+    Returns:
+    - tuple: Un tuple contenant la longitude et la latitude en tant que nombres flottants.
+    """
+    longitude, latitude = map(float, coord_str.split(";"))
+    return longitude, latitude
+
+
 
 # Fonction pour récupérer les itinéraires
-def fetch_computed_routes(api_key, waypoints, bike_details):
+def fetch_computed_routes(waypoints, bike_details):
     """Envoie une requête à l'API Geovelo pour récupérer des itinéraires."""
     url = "https://prim.iledefrance-mobilites.fr/marketplace/computedroutes?geometry=true"
     data = {
@@ -34,7 +79,7 @@ def fetch_computed_routes(api_key, waypoints, bike_details):
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "apikey": api_key
+        "apikey": "Nls6MNAOPfShwP9wKokSoEQmqU7XNGuv"
     }
 
     try:
@@ -48,39 +93,32 @@ def fetch_computed_routes(api_key, waypoints, bike_details):
 # Application Streamlit
 st.title("Calculateur d'itinéraires vélo - Geovelo")
 
-# Entrée utilisateur
-api_key = st.text_input("Clé API Geovelo", type="password")
-
 st.write("### Points de passage")
-start_lat = st.number_input("Latitude de départ", value=48.872096, format="%.6f")
-start_lon = st.number_input("Longitude de départ", value=2.33261, format="%.6f")
-start_title = st.text_input("Titre du point de départ", value="Métro-Opéra, Paris")
-
-end_lat = st.number_input("Latitude d'arrivée", value=48.84059, format="%.6f")
-end_lon = st.number_input("Longitude d'arrivée", value=2.32134, format="%.6f")
-end_title = st.text_input("Titre du point d'arrivée", value="Gare Montparnasse, Paris")
-
-st.write("### Détails du vélo")
-profile = st.selectbox("Profil", ["MEDIAN", "FAST", "SLOW"], index=0)
-bike_type = st.selectbox("Type de vélo", ["TRADITIONAL", "ELECTRIC"], index=0)
-average_speed = st.number_input("Vitesse moyenne (km/h)", value=16, step=1)
+departure_address = st.text_input("Adresse de départ :")
+arrival_address = st.text_input("Adresse d'arrivée :")
 e_bike = st.checkbox("Vélo électrique", value=False)
 
 if st.button("Calculer l'itinéraire"):
-    if api_key:
+    if departure_address and arrival_address:
+        st.info("Géocodage des adresses...")
+        from_coords = geocode_address_nominatim(departure_address)
+        # Séparer en longitude et latitude
+        from_longitude, from_latitude = separate_coordinates(from_coords)
+        time.sleep(1)
+        to_coords = geocode_address_nominatim(arrival_address)
+        # Séparer en longitude et latitude
+        to_longitude, to_latitude = separate_coordinates(to_coords)
+
         waypoints = [
-            {"latitude": start_lat, "longitude": start_lon, "title": start_title},
-            {"latitude": end_lat, "longitude": end_lon, "title": end_title}
+            {"latitude": from_latitude, "longitude": from_longitude, "title": departure_address},
+            {"latitude": to_latitude, "longitude": to_longitude, "title": arrival_address}
         ]
 
         bike_details = {
-            "profile": profile,
-            "bikeType": bike_type,
-            "averageSpeed": average_speed,
             "eBike": e_bike
         }
 
-        result = fetch_computed_routes(api_key, waypoints, bike_details)
+        result = fetch_computed_routes(waypoints, bike_details)
         if result:
             st.success("Itinéraires récupérés avec succès.")
 
@@ -108,9 +146,6 @@ if st.button("Calculer l'itinéraire"):
                 )
 
                 with st.expander(expander_title):
-                    st.write(f"### Détails de l'itinéraire")
-                    st.write(f"- **Distance totale :** {total_distance / 1000:.1f} km")
-
                     # Visualisation de l'itinéraire sur une carte
                     st.write("#### Carte de l'itinéraire")
                     sections = journey.get("sections", [])
@@ -118,14 +153,12 @@ if st.button("Calculer l'itinéraire"):
                         geometry = section.get("geometry")
                         if geometry:  # Si une géométrie est fournie
                             path = decode_polyline(geometry)  # Décoder la polyligne
-                            st.write("Coordonnées décodées :", path)
                             map_data = pd.DataFrame(path)  # Créer un DataFrame pour pydeck
                             
                             # Vérification des colonnes lat et lon
                             if 'lat' not in map_data.columns or 'lon' not in map_data.columns:
                                 st.write("Les coordonnées n'ont pas les bonnes colonnes 'lat' et 'lon'.")
                             else:
-                                st.write("Coordonnées décodées (DataFrame) :", map_data)
                                 midpoint = map_data.mean().to_dict()
 
                                 # Formatage des données pour PathLayer
@@ -156,4 +189,4 @@ if st.button("Calculer l'itinéraire"):
         else:
             st.error("Aucun itinéraire disponible.")
     else:
-        st.error("Veuillez fournir une clé API valide.")
+        st.warning("Veuillez entrer les deux adresses.")
