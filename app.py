@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import time
 from datetime import datetime
 import pandas as pd
 import pydeck as pdk
@@ -133,26 +132,52 @@ def display_journey_choices(journey_data):
         )
 
         with st.expander(expander_title):
+            st.markdown("### Détails des étapes :")
+            map_center = None
+            journey_map = folium.Map(zoom_start=12)
+
+            # Liste des coordonnées pour ajuster le zoom
+            all_coords = []
+
             for section in journey["sections"]:
                 section_type = section["type"]
+                mode = section.get("mode", "Inconnu")
+                duration = section.get("duration", 0) // 60  # Convertir en minutes
+                description = section.get("display_informations", {}).get("label", "Pas d'information")
+                st.write(f"- **{section_type.capitalize()}** : {description} ({duration} min)")
 
-                if section_type == "street_network":
-                    from_name = section.get("from", {}).get("name", "Point inconnu")
-                    to_name = section.get("to", {}).get("name", "Point inconnu")
-                    duration = section.get("duration", 0)
-                    st.write(f"- 🚶‍♂️ Marche ({duration // 60} minutes) : {from_name} -> {to_name}")
+                # Coordonnées pour la carte
+                from_coords = section.get("from", {}).get("stop_point", {}).get("coord", None)
+                to_coords = section.get("to", {}).get("stop_point", {}).get("coord", None)
 
-                elif section_type == "public_transport":
-                    from_name = section.get("from", {}).get("name", "Arrêt inconnu")
-                    to_name = section.get("to", {}).get("name", "Arrêt inconnu")
-                    mode = section.get("display_informations", {}).get("commercial_mode", "Transport")
-                    line = section.get("display_informations", {}).get("label", "Ligne inconnue")
-                    duration = section.get("duration", 0)
-                    st.write(f"- 🚇 {mode} {line} ({duration // 60} minutes) : {from_name} -> {to_name}")
+                if from_coords and to_coords:
+                    from_lat, from_lon = float(from_coords["lat"]), float(from_coords["lon"])
+                    to_lat, to_lon = float(to_coords["lat"]), float(to_coords["lon"])
 
-                elif section_type == "transfer":
-                    duration = section.get("duration", 0)
-                    st.write(f"- 🔄 Correspondance ({duration // 60} minutes)")
+                    # Ajouter les coordonnées pour ajuster le zoom
+                    all_coords.extend([(from_lat, from_lon), (to_lat, to_lon)])
+
+                    # Ligne colorée pour chaque section
+                    color = "blue" if section_type == "public_transport" else "green"
+                    folium.PolyLine(
+                        [(from_lat, from_lon), (to_lat, to_lon)],
+                        color=color,
+                        weight=5,
+                        opacity=0.8
+                    ).add_to(journey_map)
+
+                    # Points de départ et d'arrivée
+                    if not map_center:
+                        map_center = [from_lat, from_lon]
+                        folium.Marker([from_lat, from_lon], popup="Départ", icon=folium.Icon(color="green")).add_to(journey_map)
+                    folium.Marker([to_lat, to_lon], popup="Arrivée", icon=folium.Icon(color="red")).add_to(journey_map)
+
+            # Ajustement automatique du zoom
+            if all_coords:
+                journey_map.fit_bounds(all_coords)
+
+            # Affichage de la carte
+            st_folium(journey_map, width=700, height=400)
 
         st.markdown("---")
 
