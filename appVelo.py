@@ -6,6 +6,12 @@ import pydeck as pdk
 import polyline
 import time
 
+# Remplace par ton propre jeton d'API
+API_KEY = "Nls6MNAOPfShwP9wKokSoEQmqU7XNGuv"
+
+# URL de base de l'API
+BASE_URL = 'https://prim.iledefrance-mobilites.fr/marketplace'
+
 # Fonction pour géocoder une adresse avec Nominatim
 def geocode_address_nominatim(address):
     url = "https://nominatim.openstreetmap.org/search"
@@ -69,7 +75,7 @@ def separate_coordinates(coord_str):
 # Fonction pour récupérer les itinéraires
 def fetch_computed_routes(waypoints, bike_details):
     """Envoie une requête à l'API Geovelo pour récupérer des itinéraires."""
-    url = "https://prim.iledefrance-mobilites.fr/marketplace/computedroutes?geometry=true"
+    url =  f'{BASE_URL}/computedroutes?geometry=true'
     data = {
         "waypoints": waypoints,
         "bikeDetails": bike_details,
@@ -79,7 +85,7 @@ def fetch_computed_routes(waypoints, bike_details):
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "apikey": "Nls6MNAOPfShwP9wKokSoEQmqU7XNGuv"
+        "apikey": API_KEY
     }
 
     try:
@@ -89,14 +95,83 @@ def fetch_computed_routes(waypoints, bike_details):
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur lors de la requête API : {e}")
         return None
+    
+# Fonction pour obtenir les données de disponibilité des vélos et bornes
+def get_station_status():
+    url = f'{BASE_URL}/velib/station_status.json'
+    headers = {
+        'apiKey': API_KEY
+    }
+    
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json().get("data", {}).get("stations", [])
+    else:
+        st.error(f"Erreur {response.status_code}: Impossible de récupérer les données.")
+        return None
+
+# Fonction pour obtenir les informations sur les stations (localisation, caractéristiques)
+def get_station_information():
+    url = f'{BASE_URL}/velib/station_information.json'
+    headers = {
+        'apiKey': API_KEY
+    }
+    
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json().get("data", {}).get("stations", [])
+    else:
+        st.error(f"Erreur {response.status_code}: Impossible de récupérer les données.")
+        return None
+    
+# Combiner les informations des stations et leurs statuts
+def merge_station_data(station_info, station_status):
+    info_df = pd.DataFrame(station_info)
+    status_df = pd.DataFrame(station_status)
+    # Fusionner les deux DataFrames sur "station_id"
+    merged_data = pd.merge(info_df, status_df, on="station_id", how="inner")
+    return merged_data
+
+
+# Obtenir les données vélib
+station_info = get_station_information()
+station_status = get_station_status()
+
+if not station_info or not station_status:
+    st.warning("Impossible de récupérer les données des stations ou leurs statuts.")
+else:
+    # Fusionner les données
+    station_data = merge_station_data(station_info, station_status)
+
+    # Ajouter une colonne avec des informations détaillées pour le tooltip
+    def extract_bike_types(bike_types):
+        """Extraire les vélos mécaniques et électriques depuis `num_bikes_available_types`."""
+        mechanical = next((item.get("mechanical", 0) for item in bike_types if "mechanical" in item), 0)
+        ebike = next((item.get("ebike", 0) for item in bike_types if "ebike" in item), 0)
+        return mechanical, ebike
+
+    station_data["mechanical_bikes"], station_data["ebike_bikes"] = zip(
+        *station_data["num_bikes_available_types"].apply(extract_bike_types)
+    )
+
+    station_data["tooltip_info"] = (
+        "<b>Nom:</b> " + station_data["name"] + "<br/>"
+        "<b>Vélos disponibles:</b> " + station_data["num_bikes_available"].astype(str) + "<br/>"
+        "<b>Types de vélos:</b> " +
+        "Mécaniques: " + station_data["mechanical_bikes"].astype(str) + ", Électriques: " + station_data["ebike_bikes"].astype(str) + "<br/>"
+        "<b>Places libres:</b> " + station_data["num_docks_available"].astype(str)
+    )
+
+
 
 # Application Streamlit
-st.title("Calculateur d'itinéraires vélo - Geovelo")
+st.title("🚲 Calculateur d'itinéraires vélo et des stations Vélib")
 
-st.write("### Points de passage")
-departure_address = st.text_input("Adresse de départ :")
-arrival_address = st.text_input("Adresse d'arrivée :")
-e_bike = st.checkbox("Vélo électrique", value=False)
+departure_address = st.text_input("🏳️ Adresse de départ :")
+arrival_address = st.text_input("📍 Adresse d'arrivée :")
+e_bike = st.checkbox("⚡ Vélo électrique", value=False)
 
 if st.button("Calculer l'itinéraire"):
     if departure_address and arrival_address:
@@ -148,6 +223,7 @@ if st.button("Calculer l'itinéraire"):
                 with st.expander(expander_title):
                     # Visualisation de l'itinéraire sur une carte
                     st.write("#### Carte de l'itinéraire")
+                    
                     sections = journey.get("sections", [])
                     for section in sections:
                         geometry = section.get("geometry")
@@ -172,15 +248,31 @@ if st.button("Calculer l'itinéraire"):
                                         zoom=12
                                     ),
                                     layers=[
+                                        # Couche des stations Vélib'
+                                        pdk.Layer(
+                                            "ScatterplotLayer",
+                                            data=station_data,
+                                            get_position="[lon, lat]",
+                                            get_radius=25,
+                                            get_fill_color=[0, 128, 0],  # Couleur des stations
+                                            pickable=True,
+                                            auto_highlight=True  # Pour mettre en surbrillance au survol
+                                            
+                                        ),
+                                        # Couche des itinéraires
                                         pdk.Layer(
                                             "PathLayer",
                                             data=path_data,
                                             get_path="path",  # Chaque élément "path" est une liste de [lon, lat]
-                                            get_width=4,
+                                            get_width=10,
                                             get_color=[0, 0, 255],
-                                            pickable=True,
+                                            pickable=True
                                         )
-                                    ]
+                                    ],
+                                    tooltip={
+                                        "html": "{tooltip_info}",
+                                        "style": {"color": "white"}
+                                        }
                                 ))
                         else:
                             st.write("Aucune géométrie disponible pour cette section.")
@@ -190,3 +282,6 @@ if st.button("Calculer l'itinéraire"):
             st.error("Aucun itinéraire disponible.")
     else:
         st.warning("Veuillez entrer les deux adresses.")
+
+
+

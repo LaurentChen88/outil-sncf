@@ -115,9 +115,6 @@ def display_journey_choices(journey_data):
                     duration = section.get("duration", 0)
                     st.write(f"- 🔄 Correspondance ({duration // 60} minutes)")
 
-                else:
-                    st.write(f"- ⚙️ {section_type.capitalize()} : Informations supplémentaires non disponibles.")
-
         st.markdown("---")
 
 
