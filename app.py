@@ -5,9 +5,9 @@ import pandas as pd
 import pydeck as pdk
 import polyline
 import time
+import os
 
-# Remplace par ton propre jeton d'API
-API_KEY = "Nls6MNAOPfShwP9wKokSoEQmqU7XNGuv"
+API_KEY = os.getenv('API_KEY')
 
 # URL de base de l'API
 BASE_URL = 'https://prim.iledefrance-mobilites.fr/marketplace'
