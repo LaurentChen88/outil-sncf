@@ -6,8 +6,11 @@ import pydeck as pdk
 import polyline
 import time
 import os
+import folium
+from streamlit_folium import folium_static
 
-API_KEY = os.getenv('API_KEY')
+
+API_KEY = os.getenv('API_KEY') 
 
 # URL de base de l'API
 BASE_URL = 'https://prim.iledefrance-mobilites.fr/marketplace'
@@ -82,6 +85,57 @@ def geocode_address_nominatim(address):
         st.error(f"Erreur lors du géocodage : {e}")
         return None
 
+# Fonction pour ajouter les itinéraires sur la carte
+def add_route_to_map(map_obj, section, color, dash_array, stop_date_times, display_name, mode):
+    # Si c'est un itinéraire de type public_transport, chercher les coordonnées dans geojson
+    geojson = section.get("geojson", {})
+
+    coordinates = geojson.get("coordinates", None)
+
+    if coordinates:
+        # Tracer une polyline entre chaque paire successive de coordonnées
+        for i in range(len(coordinates) - 1):
+            try:
+                from_coords = coordinates[i]  # Coordonnée actuelle [lon, lat]
+                to_coords = coordinates[i + 1]  # Coordonnée suivante [lon, lat]
+
+                # Inverser l'ordre pour correspondre au format [lat, lon] de Folium
+                from_lon, from_lat = from_coords
+                to_lon, to_lat = to_coords
+
+                # Ajouter une polyline sur la carte entre chaque paire de coordonnées
+                folium.PolyLine(
+                    locations=[[from_lat, from_lon], [to_lat, to_lon]],  # [lat, lon] attendu par Folium
+                    color=color,
+                    weight=4,
+                    opacity=0.8,
+                    dash_array=dash_array
+                ).add_to(map_obj)
+            except (IndexError, ValueError) as e:
+                print(f"Erreur dans 'public_transport', erreur: {e}")
+                continue
+
+        for stop in stop_date_times:
+            # Extraire les coordonnées de la station
+            stop_coords = stop.get("stop_point", {}).get("coord", {})
+            stop_name = stop.get("stop_point", {}).get("name", "Station inconnue")
+            lat = stop_coords.get("lat")
+            lon = stop_coords.get("lon")
+
+            # Vérifier si les coordonnées existent et ajouter un marqueur sur la carte
+            if lat and lon:
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=5,
+                    color=color,  # Contour
+                    fill=True,
+                    fill_color="white", # Intérieur blanc
+                    fill_opacity=1,
+                    tooltip=f"{mode} {display_name} - {stop_name}"  # Affichage du tooltip
+                ).add_to(map_obj)
+
+
+
 
 # Fonction pour récupérer un itinéraire via l'API Ile-de-France Mobilités
 def get_journey(from_coords, to_coords):
@@ -138,14 +192,24 @@ def display_journey_choices(journey_data):
             f"Durée : {duration_str} | CO₂ : {co2_str} | Prix : {fare_str}"
         )
 
+        journey_map = folium.Map(location=[48.8566, 2.3522], zoom_start=12, tiles = "cartodbpositron")  # Coordonnées de Paris par défaut
+
         with st.expander(expander_title):
             for section in journey["sections"]:
+                # Initialiser style
+                color = "808080" # gris
+                dash_array = ""
+                stop_date_times = []
+                display_name = ""
+                mode = ""
+
                 section_type = section["type"]
 
                 if section_type == "street_network":
                     from_name = section.get("from", {}).get("name", "Point inconnu")
                     to_name = section.get("to", {}).get("name", "Point inconnu")
                     duration = section.get("duration", 0)
+                    dash_array = "5, 5"
                     st.write(f"- 🚶‍♂️ Marche ({duration // 60} minutes) : {from_name} -> {to_name}")
 
                 elif section_type == "public_transport":
@@ -154,11 +218,25 @@ def display_journey_choices(journey_data):
                     mode = section.get("display_informations", {}).get("commercial_mode", "Transport")
                     line = section.get("display_informations", {}).get("label", "Ligne inconnue")
                     duration = section.get("duration", 0)
+                    color = section.get("display_informations", {}).get("color")  # Couleur de la ligne
+                    dash_array = "" # trait continu
+                    display_name = section.get("display_informations", {}).get("name", "Nom indisponible")  # Nom affiché de la station
                     st.write(f"- 🚇 {mode} {line} ({duration // 60} minutes) : {from_name} -> {to_name}")
+
+                    # Récupérer le tableau stop_date_times et afficher les stations
+                    stop_date_times = section.get("stop_date_times", [])
+                    
 
                 elif section_type == "transfer":
                     duration = section.get("duration", 0)
+                    dash_array = "5, 5"
                     st.write(f"- 🔄 Correspondance ({duration // 60} minutes)")
+
+                add_route_to_map(journey_map, section, color=f"#{color}", dash_array=dash_array, stop_date_times=stop_date_times, display_name=display_name, mode=mode)  # Ajouter l'itinéraire sur la carte
+
+            # Affichage de la carte dans Streamlit
+            st.write("### Carte de l'itinéraire")
+            folium_static(journey_map)
 
         st.markdown("---")
 
