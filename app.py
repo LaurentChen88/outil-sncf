@@ -12,6 +12,12 @@ API_KEY = "Nls6MNAOPfShwP9wKokSoEQmqU7XNGuv"
 # URL de base de l'API
 BASE_URL = 'https://prim.iledefrance-mobilites.fr/marketplace'
 
+st.set_page_config(
+    page_title="Calculateur d'itinéraire IDFM",  # Le titre que tu veux pour l'onglet
+    page_icon="🚀",               # (Optionnel) Une icône pour l'onglet
+    layout="centered"             # (Optionnel) "wide" pour une mise en page large
+)
+
 # Personnalisation du bouton avec du CSS
 st.markdown("""
     <style>
